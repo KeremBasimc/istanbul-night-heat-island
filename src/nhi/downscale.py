@@ -19,9 +19,12 @@ def upsample(coarse: np.ndarray, factor: int = FACTOR) -> np.ndarray:
 
 def block_mean(fine: np.ndarray, factor: int = FACTOR) -> np.ndarray:
     """Mean of the finite fine pixels inside each coarse pixel (NaN if none)."""
+    import warnings
+
     h, w = fine.shape[0] // factor, fine.shape[1] // factor
     blocks = fine[: h * factor, : w * factor].reshape(h, factor, w, factor)
-    with np.errstate(invalid="ignore"):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)   # all-NaN blocks -> NaN
         return np.nanmean(blocks, axis=(1, 3))
 
 
