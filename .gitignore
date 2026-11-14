@@ -1,0 +1,22 @@
+# Local data cache
+data/*
+!data/README.md
+
+# Large raster and array files
+*.tif
+*.tiff
+*.nc
+*.h5
+*.hdf
+*.zarr/
+
+# Credentials
+.netrc
+_netrc
+*.env
+
+# Python and Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
