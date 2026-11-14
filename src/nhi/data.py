@@ -92,25 +92,32 @@ def _open_clipped(path: Path, bbox=AOI_BBOX):
     return da.rio.clip_box(*bbox, crs="EPSG:4326")
 
 
-def clear_land_fraction(cloud_path: Path, water_path: Path, bbox=AOI_BBOX) -> float:
-    """Share of land pixels inside the AOI that the ECOSTRESS cloud mask marks clear.
+def clear_land_pixels(lst_path: Path, cloud_path: Path, water_path: Path, bbox=AOI_BBOX) -> int:
+    """Number of AOI land pixels with a valid, cloud-free LST value.
 
-    Returns NaN when the granule does not cover the AOI.
+    The cloud and water layers are 0 outside the swath as well, so a pixel is
+    only counted when the LST layer also holds a valid value there.
     """
+    lst = _open_clipped(lst_path, bbox).values
     cloud = _open_clipped(cloud_path, bbox).values
     water = _open_clipped(water_path, bbox).values
-    land = water == 0
-    if land.sum() == 0:
-        return float("nan")
-    return float(((cloud == 0) & land).sum() / land.sum())
+    valid = np.isfinite(lst) & (lst > 0)
+    return int((valid & (cloud == 0) & (water == 0)).sum())
 
 
 def add_clear_fraction(granules: pd.DataFrame, folder: Path, bbox=AOI_BBOX) -> pd.DataFrame:
-    """Download the cloud and water layers and add a `clear_frac` column."""
+    """Add `clear_pixels` and `clear_frac` columns.
+
+    `clear_frac` is relative to the best-covered granule, which stands in for
+    "all land pixels of the AOI observed under clear sky".
+    """
+    lst_paths = download(granules["url_LST"].tolist(), folder)
     cloud_paths = download(granules["url_cloud"].tolist(), folder)
     water_paths = download(granules["url_water"].tolist(), folder)
     out = granules.copy()
-    out["clear_frac"] = [clear_land_fraction(c, w, bbox) for c, w in zip(cloud_paths, water_paths)]
+    out["clear_pixels"] = [clear_land_pixels(l, c, w, bbox)
+                           for l, c, w in zip(lst_paths, cloud_paths, water_paths)]
+    out["clear_frac"] = out["clear_pixels"] / out["clear_pixels"].max()
     return out
 
 
