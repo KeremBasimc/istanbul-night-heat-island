@@ -185,6 +185,15 @@ def ecostress_on_grid(lst_path: Path, cloud_path: Path, water_path: Path, geobox
 # MODIS
 # --------------------------------------------------------------------------
 
+def _modis_platform(item) -> str:
+    """'terra' or 'aqua'. Some catalogue items leave `platform` empty, so fall back
+    to the product name (MOD11A1 = Terra, MYD11A1 = Aqua)."""
+    platform = (item.properties.get("platform") or "").lower()
+    if platform:
+        return platform
+    return {"MOD": "terra", "MYD": "aqua"}.get(item.id[:3].upper(), "")
+
+
 def load_modis_night_passes(night_date: dt.date, geobox, bbox=AOI_BBOX) -> dict:
     """Terra and Aqua night LST for the night that starts on `night_date`.
 
@@ -201,7 +210,7 @@ def load_modis_night_passes(night_date: dt.date, geobox, bbox=AOI_BBOX) -> dict:
     lon_center = (bbox[0] + bbox[2]) / 2
     out = {}
     for platform in MODIS_PLATFORMS:
-        its = [it for it in items if it.properties.get("platform", "").lower() == platform]
+        its = [it for it in items if _modis_platform(it) == platform]
         if not its:
             continue
         ds = odc.stac.load(its, bands=["LST_Night_1km", "Night_view_time"],
@@ -210,6 +219,8 @@ def load_modis_night_passes(night_date: dt.date, geobox, bbox=AOI_BBOX) -> dict:
         lst = (raw.where(raw > 0) * MODIS_LST_SCALE - 273.15).rename("lst_c")
         vt = ds["Night_view_time"].isel(time=0).astype("float32")
         solar_h = vt.where(vt < 255) * MODIS_TIME_SCALE
+        if not np.isfinite(solar_h.values).any():   # no retrieval over the AOI
+            continue
         # local solar time -> local clock time (UTC+3)
         clock = (float(np.nanmedian(solar_h.values)) + UTC_OFFSET_H - lon_center / 15) % 24
         out[platform] = {"lst": lst, "clock_h": clock,
