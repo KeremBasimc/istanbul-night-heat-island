@@ -9,5 +9,6 @@ pystac-client
 planetary-computer
 odc-stac
 earthaccess
+scipy
 scikit-learn
 matplotlib
