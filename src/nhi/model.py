@@ -19,6 +19,7 @@ STATIC_GROUPS = {
     "built": ["built", "ndbi", "bare"],
     "location": ["sea_dist_km", "elev"],
     "heat_storage": ["landsat_day"],
+    "building_height": ["bldg_height"],
 }
 # Night-level context, the same value for every pixel of a night
 # (except modis_coarse, which varies by 980 m block).

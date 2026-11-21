@@ -61,7 +61,7 @@ docs/        project documents
 ## Timeline
 
 - [x] Topic approved by the instructor
-- [ ] Interim presentation and first demo: 23 November 2026
+- [ ] Interim presentation and first demo: 30 November 2026
 - [ ] Final presentation: 28 December 2026
 - [ ] IEEE conference paper: 4 January 2027
 

@@ -93,6 +93,44 @@ def sentinel2_indices(year: int, fine, bbox=AOI_BBOX, months=("06-01", "08-31"),
     return {"ndvi": ndvi.values.astype("float32"), "ndbi": ndbi.values.astype("float32")}
 
 
+GHSL_HEIGHT_URL = (
+    "https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/GHSL/GHS_BUILT_H_GLOBE_R2023A/"
+    "GHS_BUILT_H_ANBH_E2018_GLOBE_R2023A_54009_100/V1-0/tiles/"
+    "GHS_BUILT_H_ANBH_E2018_GLOBE_R2023A_54009_100_V1_0_{tile}.zip"
+)
+GHSL_TILE = "R5_C21"   # 1000 km Mollweide tile that covers Istanbul
+
+
+def ghsl_building_height(fine, folder="data/ghsl", tile: str = GHSL_TILE) -> np.ndarray:
+    """Average building height (m) from GHS-BUILT-H 2018 (100 m), on the 70 m grid.
+
+    The tile is downloaded once into `folder`. Pixels without buildings are 0.
+    """
+    import urllib.request
+    import zipfile
+    from pathlib import Path
+
+    import rioxarray
+    from rasterio.enums import Resampling
+
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    zpath = folder / f"ghsl_height_{tile}.zip"
+    if not zpath.exists():
+        urllib.request.urlretrieve(GHSL_HEIGHT_URL.format(tile=tile), zpath)
+    tifs = list(folder.glob(f"*{tile}.tif"))
+    if not tifs:
+        with zipfile.ZipFile(zpath) as z:
+            z.extractall(folder)
+        tifs = list(folder.glob(f"*{tile}.tif"))
+    da = rioxarray.open_rasterio(tifs[0], masked=True).squeeze("band", drop=True)
+    out = da.astype("float32").rio.reproject(
+        fine.crs.to_wkt(), shape=fine.shape.yx, transform=fine.transform,
+        resampling=Resampling.bilinear,
+    )
+    return np.nan_to_num(out.values, nan=0.0).astype("float32")
+
+
 def landsat_day_lst(year: int, fine, bbox=AOI_BBOX, months=("06-01", "08-31"),
                     max_cloud: float = 30.0) -> np.ndarray:
     """Median summer daytime LST (degrees C) from Landsat 8/9, a heat-storage proxy."""
