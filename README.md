@@ -36,10 +36,25 @@ All inputs are open and accessed from code. Licences and access dates are record
 
 ## Method
 
-- **Pairing:** each cloud-free ECOSTRESS night is matched with the closest MODIS night overpass (Terra about 22:30, Aqua about 01:30 local time).
-- **Model:** a random forest predicts each 70 m pixel's deviation from its MODIS pixel from night-cooling predictors. A residual correction keeps the 70 m pixels consistent with the MODIS value.
-- **Benchmarks:** TsHARP (Agam et al., 2007), plain upsampling of MODIS, and a Sentinel-2-only random forest.
-- **Validation:** leave-one-night-out against held-out ECOSTRESS nights. RMSE, MAE, bias (°C) and R², with bootstrap confidence intervals and an ablation of predictor groups.
+- **Pairing:** each cloud-free ECOSTRESS night is matched with the closest MODIS night overpass (Terra about 23:00, Aqua about 02:00–04:00 local time). Days missing from Planetary Computer are read from NASA's HDF files.
+- **Cloud screen:** nights where the two sensors disagree grossly at 980 m (median difference above 5 K or negative correlation) are dropped for every method.
+- **Proposed two-step fusion:**
+  1. *Block correction (980 m):* a random forest learns where the MODIS night pattern differs from the ECOSTRESS block means (MODIS neighbourhood pattern, coast, elevation, time gap) and corrects the MODIS block values.
+  2. *70 m anomaly:* a second random forest predicts each 70 m pixel's deviation from its block mean from vegetation, built-up, building height, elevation, distance to the sea and daytime heat storage; the re-centred anomaly is added to the corrected block value.
+- **Benchmarks:** plain upsampling of MODIS, fixed spatial filters of MODIS (bilinear, 3×3 and 5×5 mean, Gaussian), TsHARP (Agam et al., 2007) and a Sentinel-2-only random forest.
+- **Validation:** 6-fold leave-nights-out against held-out ECOSTRESS nights, with the same folds for every method. Bias-removed RMSE, RMSE, MAE, bias (°C) and r, a paired bootstrap over nights, an ablation of predictor groups and the within-block skill at 70, 140 and 490 m.
+
+### First results (51 clear nights, 2019–2025)
+
+| Method               | Bias-removed RMSE (°C), mean | median | r     |
+|----------------------|------------------------------|--------|-------|
+| MODIS upsampled      | 1.255                        | 1.044  | 0.578 |
+| Best MODIS filter (5×5 mean) | 1.245                | 1.059  | –     |
+| TsHARP               | 1.314                        | 1.108  | 0.557 |
+| Sentinel-2-only RF   | 1.254                        | 1.046  | 0.579 |
+| **Proposed fusion**  | **1.105**                    | **0.938** | **0.627** |
+
+The fusion lowers the bias-removed RMSE by 12 % against MODIS and 16 % against TsHARP (95 % bootstrap intervals exclude zero; better on 46 and 48 of 50 nights). Most of the night error sits between 980 m blocks; the 70 m detail inside a block is small (median SD 0.54 °C) and only partly predictable, while TsHARP's NDVI rule carries almost no skill at night.
 
 ## Repository structure
 
