@@ -194,7 +194,66 @@ def _modis_platform(item) -> str:
     return {"MOD": "terra", "MYD": "aqua"}.get(item.id[:3].upper(), "")
 
 
-def load_modis_night_passes(night_date: dt.date, geobox, bbox=AOI_BBOX) -> dict:
+# MODIS sinusoidal grid: 10 x 10 degree tiles of 1200 x 1200 pixels at 1 km
+MODIS_SINU_CRS = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs"
+MODIS_TILE_SIZE = 1111950.5196666666
+MODIS_ORIGIN = (-20015109.354, 10007554.677)
+MODIS_SHORT_NAMES = {"terra": "MOD11A1", "aqua": "MYD11A1"}
+
+
+def _modis_tile_transform(h: int, v: int, n: int = 1200):
+    from affine import Affine
+
+    px = MODIS_TILE_SIZE / n
+    return Affine(px, 0, MODIS_ORIGIN[0] + h * MODIS_TILE_SIZE,
+                  0, -px, MODIS_ORIGIN[1] - v * MODIS_TILE_SIZE)
+
+
+def read_modis_hdf(path: Path, geobox):
+    """LST_Night_1km and Night_view_time (raw integers) from a MOD11A1/MYD11A1 HDF4
+    file, placed on `geobox` with nearest-neighbour resampling."""
+    import re
+
+    import xarray as xr
+    from pyhdf.SD import SD, SDC
+    from rasterio.enums import Resampling
+
+    h, v = map(int, re.search(r"\.h(\d\d)v(\d\d)\.", Path(path).name).groups())
+    sd = SD(str(path), SDC.READ)
+    try:
+        bands = {b: sd.select(b).get().astype("float32") for b in ("LST_Night_1km", "Night_view_time")}
+    finally:
+        sd.end()
+    tf = _modis_tile_transform(h, v, bands["LST_Night_1km"].shape[0])
+    out = []
+    for name, arr, fill in (("LST_Night_1km", bands["LST_Night_1km"], 0),
+                            ("Night_view_time", bands["Night_view_time"], 255)):
+        da = xr.DataArray(arr, dims=("y", "x"))
+        da = da.rio.write_crs(MODIS_SINU_CRS).rio.write_transform(tf).rio.write_nodata(fill)
+        da = da.assign_coords(x=tf.c + tf.a * (np.arange(arr.shape[1]) + 0.5),
+                              y=tf.f + tf.e * (np.arange(arr.shape[0]) + 0.5))
+        # cells outside the tile get the fill value, which the caller masks
+        out.append(da.rio.reproject(geobox.crs.to_wkt(), shape=geobox.shape.yx,
+                                    transform=geobox.transform, resampling=Resampling.nearest))
+    return out[0], out[1]
+
+
+def _modis_from_earthdata(night_date: dt.date, platform: str, geobox, folder: Path, bbox=AOI_BBOX):
+    """Download the MOD11A1/MYD11A1 HDF for one day from NASA (needs Earthdata login)."""
+    import earthaccess
+
+    day = night_date.isoformat()
+    res = earthaccess.search_data(short_name=MODIS_SHORT_NAMES[platform], version="061",
+                                  temporal=(day, day), bounding_box=tuple(bbox))
+    res = [g for g in res if f".A{night_date:%Y%j}." in g.data_links()[0]]
+    if not res:
+        return None
+    folder.mkdir(parents=True, exist_ok=True)
+    files = earthaccess.download(res[:1], str(folder))
+    return read_modis_hdf(Path(files[0]), geobox)
+
+
+def load_modis_night_passes(night_date: dt.date, geobox, bbox=AOI_BBOX, hdf_folder=None) -> dict:
     """Terra and Aqua night LST for the night that starts on `night_date`.
 
     The MODIS daily file is organised by UTC day. Both night passes of the night
@@ -211,13 +270,24 @@ def load_modis_night_passes(night_date: dt.date, geobox, bbox=AOI_BBOX) -> dict:
     out = {}
     for platform in MODIS_PLATFORMS:
         its = [it for it in items if _modis_platform(it) == platform]
-        if not its:
+        if its:
+            ds = odc.stac.load(its, bands=["LST_Night_1km", "Night_view_time"],
+                               geobox=geobox, groupby="solar_day", resampling="nearest")
+            raw = ds["LST_Night_1km"].isel(time=0).astype("float32")
+            vt = ds["Night_view_time"].isel(time=0).astype("float32")
+        elif hdf_folder is not None:
+            # Planetary Computer misses some days (e.g. Jul-Nov 2025): read NASA's HDF file
+            try:
+                got = _modis_from_earthdata(night_date, platform, geobox, Path(hdf_folder), bbox)
+            except Exception as err:   # a missing file must not stop a long run
+                print(f"MODIS HDF {platform} {night_date}: {err}")
+                got = None
+            if got is None:
+                continue
+            raw, vt = got
+        else:
             continue
-        ds = odc.stac.load(its, bands=["LST_Night_1km", "Night_view_time"],
-                           geobox=geobox, groupby="solar_day", resampling="nearest")
-        raw = ds["LST_Night_1km"].isel(time=0).astype("float32")
         lst = (raw.where(raw > 0) * MODIS_LST_SCALE - 273.15).rename("lst_c")
-        vt = ds["Night_view_time"].isel(time=0).astype("float32")
         solar_h = vt.where(vt < 255) * MODIS_TIME_SCALE
         if not np.isfinite(solar_h.values).any():   # no retrieval over the AOI
             continue

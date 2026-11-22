@@ -12,3 +12,4 @@ earthaccess
 scipy
 scikit-learn
 matplotlib
+pyhdf
