@@ -214,6 +214,7 @@ def read_modis_hdf(path: Path, geobox):
     file, placed on `geobox` with nearest-neighbour resampling."""
     import re
 
+    import rioxarray  # noqa: F401  (adds the .rio accessor)
     import xarray as xr
     from pyhdf.SD import SD, SDC
     from rasterio.enums import Resampling
