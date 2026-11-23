@@ -49,11 +49,33 @@ def grids(bbox=AOI_BBOX, crs=UTM_CRS):
     return coarse, fine
 
 
+def with_retry(fn, *args, tries: int = 6, wait_s: float = 15.0, **kwargs):
+    """Call fn, waiting 15, 30, 60, ... s after a failure (Planetary Computer rate limits long runs)."""
+    import time
+
+    for k in range(tries):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as err:
+            if k == tries - 1:
+                raise
+            print(f"{getattr(fn, '__name__', 'call')} failed ({type(err).__name__}), retry in {wait_s * 2 ** k:.0f} s")
+            time.sleep(wait_s * 2 ** k)
+
+
+_CLIENT = None
+
+
 def _stac_client():
+    """One Planetary Computer STAC client per session (opening it is itself a request)."""
+    global _CLIENT
     import planetary_computer
     import pystac_client
 
-    return pystac_client.Client.open(PC_STAC_URL, modifier=planetary_computer.sign_inplace)
+    if _CLIENT is None:
+        _CLIENT = with_retry(pystac_client.Client.open, PC_STAC_URL,
+                             modifier=planetary_computer.sign_inplace)
+    return _CLIENT
 
 
 # --------------------------------------------------------------------------
@@ -265,15 +287,17 @@ def load_modis_night_passes(night_date: dt.date, geobox, bbox=AOI_BBOX, hdf_fold
     import odc.stac
 
     day = night_date.isoformat()
-    items = _stac_client().search(collections=[MODIS_COLLECTION], bbox=bbox,
-                                  datetime=f"{day}T00:00:00Z/{day}T23:59:59Z").item_collection()
+    items = with_retry(lambda: _stac_client().search(
+        collections=[MODIS_COLLECTION], bbox=bbox,
+        datetime=f"{day}T00:00:00Z/{day}T23:59:59Z").item_collection())
     lon_center = (bbox[0] + bbox[2]) / 2
     out = {}
     for platform in MODIS_PLATFORMS:
         its = [it for it in items if _modis_platform(it) == platform]
         if its:
-            ds = odc.stac.load(its, bands=["LST_Night_1km", "Night_view_time"],
-                               geobox=geobox, groupby="solar_day", resampling="nearest")
+            ds = with_retry(lambda: odc.stac.load(its, bands=["LST_Night_1km", "Night_view_time"],
+                                                  geobox=geobox, groupby="solar_day",
+                                                  resampling="nearest").load())
             raw = ds["LST_Night_1km"].isel(time=0).astype("float32")
             vt = ds["Night_view_time"].isel(time=0).astype("float32")
         elif hdf_folder is not None:
