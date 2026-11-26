@@ -66,6 +66,12 @@ figures/     figures for slides and the paper
 docs/        project documents
 ```
 
+## Live demo
+
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/KeremBasimc/istanbul-night-heat-island/blob/main/notebooks/04_demo.ipynb)
+
+`notebooks/04_demo.ipynb` downloads the trained fusion (release `demo-v1`), fetches one night of MODIS from Planetary Computer and makes the 70 m map in about a minute. No account is needed.
+
 ## Getting started (Google Colab)
 
 1. Open a notebook from `notebooks/` in Colab.
